@@ -1,0 +1,7 @@
+version: 2
+tunnels:
+  sweep_tunnel:
+    proto: http
+    addr: 8080
+    domain: vervet-dominant-nominally.ngrok-free.app
+authtoken: 2XEfd2ZQbYAa6XuWSf2wgjNWe7A_2Kz2ivUEWzx63P9WfA5zM
