@@ -105,9 +105,7 @@ class HumanMessagePrompt(BaseModel):
                     repo_description=self.repo_description,
                     tree=self.tree.strip("\n"),
                     title=self.title,
-                    description=self.summary
-                    if self.summary
-                    else "No description provided.",
+                    description=self.summary if not self.summary.strip().endswith("_No response_") else "No description provided.",
                     relevant_snippets=relevant_snippets,
                     relevant_directories=relevant_directories,
                     relevant_commit_history=relevant_commit_history,
@@ -119,11 +117,11 @@ class HumanMessagePrompt(BaseModel):
         return human_messages
 
     def get_issue_metadata(self):
+        self.summary = self.summary if not self.summary.strip().endswith("_No response_") else "No description provided."
         return f"""# Repo & Issue Metadata
-Repo: {self.repo_name}: {self.repo_description}
+Repo: {self.repo_name} - {self.repo_description}
 Issue Title: {self.title}
-Issue Description: {self.summary}
-"""
+Issue Description: {self.summary}"""
 
 
 def render_snippets(snippets):
@@ -228,12 +226,12 @@ class HumanMessageCommentPrompt(HumanMessagePrompt):
         return human_messages
 
     def get_issue_metadata(self):
+        self.summary = self.summary if not self.summary.strip().endswith("_No response_") else "No description provided."
         return f"""# Repo & Issue Metadata
 Repo: {self.repo_name}: {self.repo_description}
 Issue Title: {self.title}
 Issue Description: {self.summary}
-The above was the original plan. Please address the user comment: {self.comment}
-"""
+The above was the original plan. Please address the user comment: {self.comment}"""
 
 
 class HumanMessageFinalPRComment(BaseModel):

@@ -89,10 +89,9 @@ class ChatGPT(BaseModel):
             repo_info = get_description(repo)
             repo_description = repo_info["description"]
             repo_rules = repo_info["rules"]
+            repo_rules = repo_info["rules"]
             if repo_description:
                 content += f"{repo_description_prefix_prompt}\n{repo_description}"
-            if repo_rules:
-                content += f"{rules_prefix_prompt}:\n{repo_rules}"
         messages = [Message(role="system", content=content, key="system")]
 
         added_messages = human_message.construct_prompt()  # [ { role, content }, ... ]
@@ -209,18 +208,15 @@ class ChatGPT(BaseModel):
             model_to_max_tokens[model] - int(messages_length) - 400
         )  # this is for the function tokens
         logger.info("file_change_paths" + str(self.file_change_paths))
+        messages_raw = "\n".join([(message.content or "") for message in self.messages])
+        logger.info(f"Input to call openai:\n{messages_raw}")
         if len(self.file_change_paths) > 0:
             self.file_change_paths.remove(self.file_change_paths[0])
         if max_tokens < 0:
             if len(self.file_change_paths) > 0:
                 pass
             else:
-                logger.error(
-                    f"Input to OpenAI:\n{self.messages_dicts}\n{traceback.format_exc()}"
-                )
                 raise ValueError(f"Message is too long, max tokens is {max_tokens}")
-        messages_raw = "\n".join([(message.content or "") for message in self.messages])
-        logger.info(f"Input to call openai:\n{messages_raw}")
 
         messages_dicts = [self.messages_dicts[0]]
         for message_dict in self.messages_dicts[:1]:
@@ -235,7 +231,7 @@ class ChatGPT(BaseModel):
                 model_to_max_tokens[model] - int(messages_length) - gpt_4_buffer
             )  # this is for the function tokens
         if (
-            model_to_max_tokens[model] - int(messages_length) - gpt_4_buffer < 1000
+            model_to_max_tokens[model] - int(messages_length) - gpt_4_buffer < 3000
             and not OPENAI_DO_HAVE_32K_MODEL_ACCESS
         ):  # use 16k if it's OOC and no 32k
             model = "gpt-3.5-turbo-16k-0613"

@@ -106,6 +106,53 @@ second term from the code
 ...
 </extraction_terms>"""
 
+fetch_snippets_prompt_with_diff = """
+# Code
+File path: {file_path}
+<old_code>
+```
+{code}
+```
+</old_code>
+{changes_made}
+# Request
+{request}
+
+# Instructions
+{chunking_message}
+
+# Format
+<analysis_and_identification file="file_path">
+Identify all changes that need to be made to the file.
+Check the diff to make sure the changes have not previously been completed in this file.
+In a list, identify all code sections that should receive these changes and all locations code should be added. These snippets will go into the snippets_to_modify block. Pick many small snippets and locations to add code instead of a single large one.
+Then identify any patterns of code that should be modified, like all function calls of a particular function. These patterns will go into the patterns block.
+</analysis_and_identification>
+
+<snippets_to_modify>
+<snippet_to_modify reason="justification for modifying this snippet">
+```
+first few lines from the first original snippet
+...
+last few lines from the first original snippet (the code)
+```
+</snippet_to_modify>
+<snippet_to_modify reason="justification for modifying this snippet">
+```
+first few lines from the second original snippet
+...
+last few lines from the second original snippet (the code)
+```
+</snippet_to_modify>
+...
+</snippets_to_modify>
+
+<extraction_terms>
+first term from the code
+second term from the code
+...
+</extraction_terms>"""
+
 plan_snippets_system_prompt = """\
 You are a brilliant and meticulous engineer assigned to plan code changes to complete the user's request.
 
@@ -221,6 +268,7 @@ class ModifyBot:
                 + generate_diff(self.old_file_contents, file_contents)
             )
         diff += self.additional_diffs
+        diff = diff.strip("\n")
         return f"\n# Changes Made\nHere are changes we already made to this file:\n<diff>\n{diff}\n</diff>\n"
 
     def try_update_file(
@@ -292,8 +340,12 @@ class ModifyBot:
         file_change_request: FileChangeRequest,
         chunking: bool = False,
     ):
+        diffs_message = self.get_diffs_message(file_contents)
+        fetch_prompt = (
+            fetch_snippets_prompt_with_diff if diffs_message else fetch_snippets_prompt
+        )
         fetch_snippets_response = self.fetch_snippets_bot.chat(
-            fetch_snippets_prompt.format(
+            fetch_prompt.format(
                 code=extract_python_span(
                     file_contents, [file_change_request.entity]
                 ).content
@@ -435,9 +487,9 @@ class ModifyBot:
                 reason = a.reason
             elif a.reason == "Handle imports":
                 reason = b.reason
-            elif b.reason.startswith("Mentioned"):
+            elif b.reason.startswith("Mentioned") or b.reason.endswith("function call"):
                 reason = a.reason
-            elif a.reason.startswith("Mentioned"):
+            elif a.reason.startswith("Mentioned") or a.reason.endswith("function call"):
                 reason = b.reason
             return MatchToModify(
                 start=min(a.start, b.start), end=max(a.end, b.end), reason=reason
@@ -524,7 +576,7 @@ class ModifyBot:
                 file_path=file_path,
                 snippets="\n\n".join(
                     [
-                        f'<snippet index="{i}" reason="{reason}">\n{snippet}\n</snippet>'
+                        f'<snippet index="{i}" reason="{reason}">\n{snippet}</snippet>'
                         for i, (reason, snippet) in enumerate(selected_snippets)
                     ]
                 )
@@ -574,7 +626,7 @@ class ModifyBot:
                 updated_snippets[index] = current_contents
             else:
                 current_contents = updated_snippets[index]
-            updated_snippets[index] += current_contents + "\n" + updated_code
+            updated_snippets[index] = current_contents + "\n" + updated_code
 
         result = file_contents
         new_code = []

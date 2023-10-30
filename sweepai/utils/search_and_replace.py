@@ -62,7 +62,7 @@ def score_multiline(query: list[str], target: list[str]) -> float:
             scores.append((score_line(q_line, t_line), weight))
             q += 1
             t += 1
-        elif "..." in q_line:
+        elif q_line.strip().startswith("...") or q_line.strip().endswith("..."):
             # Case 3: ellipsis wildcard
             t += 1
             if q + 1 == len(query):
@@ -94,6 +94,9 @@ def score_multiline(query: list[str], target: list[str]) -> float:
             t_line.strip() == ""
             or t_line.strip().startswith("#")
             or t_line.strip().startswith("//")
+            or t_line.strip().startswith("print")
+            or t_line.strip().startswith("logger")
+            or t_line.strip().startswith("console.")
         ):
             # Case 2: skipped comment
             skipped_comments += 1
@@ -147,6 +150,7 @@ def get_max_indent(content: str, indent_type: str):
     )
 
 
+# @file_cache()
 def find_best_match(query: str, code_file: str):
     best_match = Match(-1, -1, 0)
 
@@ -168,29 +172,19 @@ def find_best_match(query: str, code_file: str):
                 best_match = Match(i, i + 1, score)
         return best_match
 
-    for num_indents in range(0, min(max_indents + 1, 20)):
+    indent_array = [i for i in range(0, min(max_indents + 1, 20))]
+    if max_indents > 3:
+        indent_array = [3, 2, 4, 0, 1] + list(range(5, max_indents + 1))
+    for num_indents in indent_array:
         indented_query_lines = [indent * num_indents + line for line in query_lines]
 
-        start_indices = [
-            i
+        start_pairs = [
+            (i, score_line(line, indented_query_lines[0]))
             for i, line in enumerate(code_file_lines)
-            if score_line(line, indented_query_lines[0]) > 50
         ]
-        start_indices = start_indices or [
-            i
-            for i in start_indices
-            if score_multiline(indented_query_lines[:2], code_file_lines[i : i + 2])
-            > 50
-        ]
-
-        if not start_indices:
-            start_pairs = [
-                (i, score_line(line, indented_query_lines[0]))
-                for i, line in enumerate(code_file_lines)
-            ]
-            start_pairs.sort(key=lambda x: x[1], reverse=True)
-            start_pairs = start_pairs[: min(40, len(start_pairs) // 5)]
-            start_indices = sorted([i for i, _ in start_pairs])
+        start_pairs.sort(key=lambda x: x[1], reverse=True)
+        start_pairs = start_pairs[: min(40, len(start_pairs) // 5)]
+        start_indices = sorted([i for i, _ in start_pairs])
 
         for i in tqdm(
             start_indices,
@@ -198,27 +192,13 @@ def find_best_match(query: str, code_file: str):
             desc=f"Indent {num_indents}/{max_indents}",
             leave=False,
         ):
-            end_indices = [
-                j
+            end_pairs = [
+                (j, score_line(line, indented_query_lines[-1]))
                 for j, line in enumerate(code_file_lines[i:], start=i)
-                if score_line(line, indented_query_lines[-1]) > 50
             ]
-            end_indices = end_indices or [
-                j
-                for j in end_indices
-                if score_multiline(
-                    indented_query_lines[-2:], code_file_lines[i + j - 1 : i + j + 1]
-                )
-                > 50
-            ]  # sus code
-            if not end_indices:
-                end_pairs = [
-                    (j, score_line(line, indented_query_lines[-1]))
-                    for j, line in enumerate(code_file_lines[i:], start=i)
-                ]
-                end_pairs.sort(key=lambda x: x[1], reverse=True)
-                end_pairs = end_pairs[: min(40, len(end_pairs) // 5)]
-                end_indices = sorted([j for j, _ in end_pairs])
+            end_pairs.sort(key=lambda x: x[1], reverse=True)
+            end_pairs = end_pairs[: min(40, len(end_pairs) // 5)]
+            end_indices = sorted([j for j, _ in end_pairs])
 
             for j in tqdm(
                 end_indices, position=1, leave=False, desc=f"Starting line {i}"

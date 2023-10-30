@@ -284,17 +284,15 @@ class ChatGPT(BaseModel):
         )  # this is for the function tokens
         # TODO: Add a check to see if the message is too long
         logger.info("file_change_paths" + str(self.file_change_paths))
+        messages_raw = "\n".join([(message.content or "") for message in self.messages])
+        logger.info(f"Input to call openai:\n{messages_raw}")
         if len(self.file_change_paths) > 0:
             self.file_change_paths.remove(self.file_change_paths[0])
         if max_tokens < 0:
             if len(self.file_change_paths) > 0:
                 pass
             else:
-                logger.error(f"Input to OpenAI:\n{self.messages_dicts}")
                 raise ValueError(f"Message is too long, max tokens is {max_tokens}")
-        messages_raw = "\n".join([(message.content or "") for message in self.messages])
-        logger.info(f"Input to call openai:\n{messages_raw}")
-
         messages_dicts = [self.messages_dicts[0]]
         for message_dict in self.messages_dicts[:1]:
             if message_dict["role"] == messages_dicts[-1]["role"]:
@@ -307,6 +305,14 @@ class ChatGPT(BaseModel):
             max_tokens = (
                 model_to_max_tokens[model] - int(messages_length) - gpt_4_buffer
             )  # this is for the function tokens
+        if (
+            model_to_max_tokens[model] - int(messages_length) - gpt_4_buffer < 3000
+            and not os.getenv("OPENAI_DO_HAVE_32K_MODEL_ACCESS")
+        ):  # use 16k if it's OOC and no 32k
+            model = "gpt-3.5-turbo-16k-0613"
+            max_tokens = (
+                model_to_max_tokens[model] - int(messages_length) - gpt_4_buffer
+            )
         if "gpt-4" in model:
             max_tokens = min(max_tokens, 5000)
         # Fix for self hosting where TPM limit is super low for GPT-4

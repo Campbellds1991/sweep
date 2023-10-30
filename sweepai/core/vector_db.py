@@ -15,7 +15,7 @@ from redis import Redis
 from sentence_transformers import SentenceTransformer  # pylint: disable=import-error
 from tqdm import tqdm
 
-from sweepai.config.client import SweepConfig
+from sweepai.config.client import SweepConfig, get_blocked_dirs
 from sweepai.config.server import (
     BATCH_SIZE,
     HUGGINGFACE_TOKEN,
@@ -99,10 +99,10 @@ def embed_replicate(texts: List[str]) -> List[np.ndarray]:
             prediction.wait()
             outputs = prediction.output
             break
-        except Exception as e:
+        except Exception:
             logger.exception(f"Replicate timeout: {e}")
     else:
-        raise Exception(f"Replicate timeout {e}")
+        raise Exception(f"Replicate timeout")
     return [output["embedding"] for output in outputs]
 
 
@@ -178,6 +178,8 @@ def get_deeplake_vs_from_repo(
     logger.info(f"Downloading repository and indexing for {repo_full_name}...")
     start = time.time()
     logger.info("Recursively getting list of files...")
+    blocked_dirs = get_blocked_dirs(repo)
+    sweep_config.exclude_dirs.extend(blocked_dirs)
     snippets, file_list = repo_to_chunks(cloned_repo.cache_dir, sweep_config)
     logger.info(f"Found {len(snippets)} snippets in repository {repo_full_name}")
     # prepare lexical search

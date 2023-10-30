@@ -389,32 +389,29 @@ def on_ticket(
 
         model_name = "GPT-3.5" if use_faster_model else "GPT-4"
         payment_link = "https://sweep.dev/pricing"
+        single_payment_link = "https://buy.stripe.com/00g3fh7qF85q0AE14d"
+        pro_payment_link = "https://buy.stripe.com/00g5npeT71H2gzCfZ8"
         daily_message = (
             f" and {daily_ticket_count} for the day"
             if not is_paying_user and not is_consumer_tier
             else ""
         )
-        user_type = "💎 Sweep Pro" if is_paying_user else "⚡ Sweep Basic Tier"
+        user_type = (
+            "💎 <b>Sweep Pro</b>" if is_paying_user else "⚡ <b>Sweep Basic Tier</b>"
+        )
         gpt_tickets_left_message = (
             f"{ticket_count} GPT-4 tickets left for the month"
             if not is_paying_user
             else "unlimited GPT-4 tickets"
         )
+        purchase_message = f"<br/><br/> For more GPT-4 tickets, visit <a href='{single_payment_link}'>our payment portal</a>. For a one week free trial, try <a href='{pro_payment_link}'>Sweep Pro</a> (unlimited GPT-4 tickets)."
         payment_message = (
             f"{user_type}: I used {model_name} to create this ticket. You have {gpt_tickets_left_message}{daily_message}."
-            + (
-                f' For more GPT-4 tickets, visit <a href="{payment_link}">our payment portal</a>.'
-                if not is_paying_user
-                else ""
-            )
+            + (purchase_message if not is_paying_user else "")
         )
         payment_message_start = (
-            f"{user_type}: I'm creating this ticket using {model_name}. You have {gpt_tickets_left_message}{daily_message}."
-            + (
-                f' For more GPT-4 tickets, visit <a href="{payment_link}">our payment portal</a>.'
-                if not is_paying_user
-                else ""
-            )
+            f"{user_type}: I'm using {model_name}. You have {gpt_tickets_left_message}{daily_message}."
+            + (purchase_message if not is_paying_user else "")
         )
 
         def get_comment_header(index, errored=False, pr_message="", done=False):
@@ -460,9 +457,6 @@ def on_ticket(
         # Find Sweep's previous comment
         for comment in comments:
             if comment.user.login == GITHUB_BOT_USERNAME:
-                logger.print(
-                    f"Found comment USERNAME {GITHUB_BOT_USERNAME} COMMENT {comment.user.login}"
-                )
                 issue_comment = comment
 
         try:
@@ -657,8 +651,8 @@ def on_ticket(
             logger.info("Issue too short")
             edit_sweep_comment(
                 (
-                    "Please add more details to your issue. I need at least 20 characters"
-                    " to generate a plan. Please join our Discord server for support (tracking_id={tracking_id})"
+                    f"Please add more details to your issue. I need at least 20 characters"
+                    f" to generate a plan. Please join our Discord server for support (tracking_id={tracking_id})"
                 ),
                 -1,
             )
@@ -678,9 +672,9 @@ def on_ticket(
                 logger.info("Test repository detected")
                 edit_sweep_comment(
                     (
-                        "Sweep does not work on test repositories. Please create an issue"
-                        " on a real repository. If you think this is a mistake, please"
-                        " report this at https://discord.gg/sweep. Please join our Discord server for support (tracking_id={tracking_id})"
+                        f"Sweep does not work on test repositories. Please create an issue"
+                        f" on a real repository. If you think this is a mistake, please"
+                        f" report this at https://discord.gg/sweep. Please join our Discord server for support (tracking_id={tracking_id})"
                     ),
                     -1,
                 )
@@ -694,56 +688,20 @@ def on_ticket(
                 )
                 return {"success": False}
 
-        logger.info("Fetching relevant files...")
-        try:
-            snippets, tree, dir_obj = search_snippets(
-                cloned_repo,
-                f"{title}\n{summary}\n{replies_text}",
-                num_files=num_of_snippets_to_query,
-            )
-            assert len(snippets) > 0
-        except SystemExit:
-            logger.warning("System exit")
-            posthog.capture(
-                username,
-                "failed",
-                properties={
-                    **metadata,
-                    "error": "System exit",
-                    "duration": time() - on_ticket_start_time,
-                },
-            )
-            raise SystemExit
-        except Exception as e:
-            trace = traceback.format_exc()
-            logger.exception(f"{trace} (tracking ID: `{tracking_id}`)")
-            edit_sweep_comment(
-                (
-                    "It looks like an issue has occurred around fetching the files."
-                    " Perhaps the repo has not been initialized. If this error persists"
-                    f" contact team@sweep.dev.\n\n> @{username}, editing this issue description to include more details will automatically make me relaunch. Please join our Discord server for support (tracking_id={tracking_id})"
-                ),
-                -1,
-            )
-            log_error(
-                is_paying_user,
-                is_consumer_tier,
-                username,
-                issue_url,
-                "File Fetch",
-                str(e) + "\n" + traceback.format_exc(),
-                priority=1,
-            )
-            posthog.capture(
-                username,
-                "failed",
-                properties={
-                    **metadata,
-                    "error": str(e),
-                    "duration": time() - on_ticket_start_time,
-                },
-            )
-            raise e
+        snippets, tree, dir_obj = fetch_relevant_files(
+            cloned_repo,
+            title,
+            summary,
+            replies_text,
+            username,
+            metadata,
+            on_ticket_start_time,
+            tracking_id,
+            edit_sweep_comment,
+            is_paying_user,
+            is_consumer_tier,
+            issue_url,
+        )
 
         # Fetch git commit history
         commit_history = cloned_repo.get_commit_history(username=username)
@@ -793,7 +751,7 @@ def on_ticket(
                 snippet
                 for snippet in snippets
                 if any(
-                    snippet.file_path.startswith(path_to_keep)
+                    path_to_keep.startswith("/".join(snippet.file_path.split("/")[:-1]))
                     for path_to_keep in paths_to_keep
                 )
             ]
@@ -1163,10 +1121,8 @@ def on_ticket(
                         + " "
                         + file_change_request.status_display
                         + " "
-                        + commit_url_display,
-                        file_change_request.instructions_ticket_display(
-                            commit_url=commit_url_display
-                        ),
+                        + (file_change_request.commit_hash_url or ""),
+                        file_change_request.instructions_ticket_display,
                         "X"
                         if file_change_request.status in ("succeeded", "failed")
                         else " ",
@@ -1236,54 +1192,25 @@ def on_ticket(
                 pass
 
             changes_required = False
-            try:
-                # CODE REVIEW
-                changes_required, review_comment = review_pr(
-                    repo=repo,
-                    pr=pr_changes,
-                    issue_url=issue_url,
-                    username=username,
-                    repo_description=repo_description,
-                    title=title,
-                    summary=summary,
-                    replies_text=replies_text,
-                    tree=tree,
-                    lint_output=lint_output,
-                    plan=plan,  # plan for the PR
-                    chat_logger=chat_logger,
-                    commit_history=commit_history,
-                )
-                lint_output = None
-                review_message += (
-                    f"Here is the {ordinal(1)} review\n"
-                    + blockquote(review_comment)
-                    + "\n\n"
-                )
-                if changes_required:
-                    edit_sweep_comment(
-                        review_message
-                        + "\n\nI'm currently addressing these suggestions.",
-                        3,
-                    )
-                    logger.info(f"Addressing review comment {review_comment}")
-                    on_comment(
-                        repo_full_name=repo_full_name,
-                        repo_description=repo_description,
-                        comment=review_comment,
-                        username=username,
-                        installation_id=installation_id,
-                        pr_path=None,
-                        pr_line_position=None,
-                        pr_number=None,
-                        pr=pr_changes,
-                        chat_logger=chat_logger,
-                        repo=repo,
-                    )
-            except SystemExit:
-                raise SystemExit
-            except Exception as e:
-                logger.error(traceback.format_exc())
-                logger.error(e)
+            changes_required, review_message = review_code(
+                repo,
+                pr_changes,
+                issue_url,
+                username,
+                repo_description,
+                title,
+                summary,
+                replies_text,
+                tree,
+                lint_output,
+                plan,
+                chat_logger,
+                commit_history,
+                review_message,
+                edit_sweep_comment,
+                repo_full_name,
+                installation_id,
+            )
 
             if changes_required:
                 edit_sweep_comment(
@@ -1330,10 +1257,36 @@ def on_ticket(
                 head=pr_changes.pr_head,
                 base=SweepConfig.get_branch(repo),
             )
+
+            # Add comment about sandbox executions
+            # for i in range(10):
+            #     print(i)
+            sandbox_execution_comment_contents = (
+                "## Sandbox Executions\n\n"
+                + "\n".join(
+                    [
+                        checkbox_template.format(
+                            check="X",
+                            filename=file_change_request.display_summary
+                            + " "
+                            + file_change_request.status_display,
+                            instructions=blockquote(
+                                file_change_request.instructions_ticket_display
+                            ),
+                        )
+                        for file_change_request in file_change_requests
+                        if file_change_request.change_type == "check"
+                    ]
+                )
+            )
+
+            pr.create_issue_comment(sandbox_execution_comment_contents)
+
             if revert_buttons:
                 pr.create_issue_comment(revert_buttons_list.serialize())
             if rule_buttons:
                 pr.create_issue_comment(rules_buttons_list.serialize())
+
             # add comments before labelling
             pr.add_to_labels(GITHUB_LABEL_NAME)
             current_issue.create_reaction("rocket")
@@ -1515,3 +1468,137 @@ def on_ticket(
     )
     logger.info("on_ticket success")
     return {"success": True}
+
+
+def review_code(
+    repo,
+    pr_changes,
+    issue_url,
+    username,
+    repo_description,
+    title,
+    summary,
+    replies_text,
+    tree,
+    lint_output,
+    plan,
+    chat_logger,
+    commit_history,
+    review_message,
+    edit_sweep_comment,
+    repo_full_name,
+    installation_id,
+):
+    try:
+        # CODE REVIEW
+        changes_required, review_comment = review_pr(
+            repo=repo,
+            pr=pr_changes,
+            issue_url=issue_url,
+            username=username,
+            repo_description=repo_description,
+            title=title,
+            summary=summary,
+            replies_text=replies_text,
+            tree=tree,
+            lint_output=lint_output,
+            plan=plan,  # plan for the PR
+            chat_logger=chat_logger,
+            commit_history=commit_history,
+        )
+        lint_output = None
+        review_message += (
+            f"Here is the {ordinal(1)} review\n" + blockquote(review_comment) + "\n\n"
+        )
+        if changes_required:
+            edit_sweep_comment(
+                review_message + "\n\nI'm currently addressing these suggestions.",
+                3,
+            )
+            logger.info(f"Addressing review comment {review_comment}")
+            on_comment(
+                repo_full_name=repo_full_name,
+                repo_description=repo_description,
+                comment=review_comment,
+                username=username,
+                installation_id=installation_id,
+                pr_path=None,
+                pr_line_position=None,
+                pr_number=None,
+                pr=pr_changes,
+                chat_logger=chat_logger,
+                repo=repo,
+            )
+    except SystemExit:
+        raise SystemExit
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        logger.error(e)
+    return changes_required, review_message
+
+
+def fetch_relevant_files(
+    cloned_repo,
+    title,
+    summary,
+    replies_text,
+    username,
+    metadata,
+    on_ticket_start_time,
+    tracking_id,
+    edit_sweep_comment,
+    is_paying_user,
+    is_consumer_tier,
+    issue_url,
+):
+    logger.info("Fetching relevant files...")
+    try:
+        snippets, tree, dir_obj = search_snippets(
+            cloned_repo,
+            f"{title}\n{summary}\n{replies_text}",
+            num_files=num_of_snippets_to_query,
+        )
+        assert len(snippets) > 0
+    except SystemExit:
+        logger.warning("System exit")
+        posthog.capture(
+            username,
+            "failed",
+            properties={
+                **metadata,
+                "error": "System exit",
+                "duration": time() - on_ticket_start_time,
+            },
+        )
+        raise SystemExit
+    except Exception as e:
+        trace = traceback.format_exc()
+        logger.exception(f"{trace} (tracking ID: `{tracking_id}`)")
+        edit_sweep_comment(
+            (
+                "It looks like an issue has occurred around fetching the files."
+                " Perhaps the repo has not been initialized. If this error persists"
+                f" contact team@sweep.dev.\n\n> @{username}, editing this issue description to include more details will automatically make me relaunch. Please join our Discord server for support (tracking_id={tracking_id})"
+            ),
+            -1,
+        )
+        log_error(
+            is_paying_user,
+            is_consumer_tier,
+            username,
+            issue_url,
+            "File Fetch",
+            str(e) + "\n" + traceback.format_exc(),
+            priority=1,
+        )
+        posthog.capture(
+            username,
+            "failed",
+            properties={
+                **metadata,
+                "error": str(e),
+                "duration": time() - on_ticket_start_time,
+            },
+        )
+        raise e
+    return snippets, tree, dir_obj
